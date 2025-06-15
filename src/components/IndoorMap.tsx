@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import SearchControls from './indoor-map/SearchControls';
 import MapView from './indoor-map/MapView';
 import DepartmentDetails from './indoor-map/DepartmentDetails';
@@ -9,15 +9,15 @@ import { Department, Location, NavigationPoint, ViewBox } from './indoor-map/typ
 
 const IndoorMap: React.FC = () => {
   const [selectedDepartment, setSelectedDepartment] = useState<Department | null>(null);
-  const [currentFloor, setCurrentFloor] = useState(1);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [userLocation, setUserLocation] = useState<Location>({ x: 50, y: 50 });
-  const [zoom, setZoom] = useState(1);
-  const [isDragging, setIsDragging] = useState(false);
+  const [currentFloor, setCurrentFloor] = useState<number>(1);
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [userLocation, setUserLocation] = useState<Location>({ x: 830, y: 150 });
+  const [zoom, setZoom] = useState<number>(1);
+  const [isDragging, setIsDragging] = useState<boolean>(false);
   const [dragStart, setDragStart] = useState<Location | null>(null);
   const [viewBox, setViewBox] = useState<ViewBox>({ x: 0, y: 0, width: 1200, height: 600 });
   const [filteredDepartments, setFilteredDepartments] = useState<Department[]>([]);
-  const [currentSection, setCurrentSection] = useState<string | null>(null);
+  const [currentSection, setCurrentSection] = useState<string | null>('bakery');
 
   // Sample data (rect-based, larger, with icons and parking lot)
   const departments: Department[] = [
@@ -140,10 +140,18 @@ const IndoorMap: React.FC = () => {
     }
   ];
 
+  const userLocationRef = useRef(userLocation);
+  const zoomRef = useRef(zoom);
+  const departmentsRef = useRef(departments);
+
+  useEffect(() => { userLocationRef.current = userLocation; }, [userLocation]);
+  useEffect(() => { zoomRef.current = zoom; }, [zoom]);
+  useEffect(() => { departmentsRef.current = departments; }, [departments]);
+
   // Update filtered departments when search query changes
   useEffect(() => {
     if (searchQuery) {
-      const filtered = departments.filter(dept =>
+      const filtered = departmentsRef.current.filter(dept =>
         dept.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         dept.category.toLowerCase().includes(searchQuery.toLowerCase()) ||
         dept.aisles?.some(aisle => 
@@ -161,46 +169,68 @@ const IndoorMap: React.FC = () => {
 
   // Handle keyboard navigation
   useEffect(() => {
-    const handleKeyPress = (e: KeyboardEvent) => {
+    const handleKeyPress = (e: KeyboardEvent): void => {
       const step = 20;
-      const zoomFactor = 1 / zoom;
+      const zoomFactor = 1 / zoomRef.current;
+      const currentDept = departmentsRef.current.find(dept => 
+        userLocationRef.current.x >= dept.x && 
+        userLocationRef.current.x <= dept.x + dept.width &&
+        userLocationRef.current.y >= dept.y && 
+        userLocationRef.current.y <= dept.y + dept.height
+      );
+
+      let newX = userLocationRef.current.x;
+      let newY = userLocationRef.current.y;
 
       switch(e.key) {
         case 'ArrowUp':
-          setUserLocation(prev => ({ ...prev, y: Math.max(prev.y - step * zoomFactor, 0) }));
+          newY = Math.max(userLocationRef.current.y - step * zoomFactor, 0);
           break;
         case 'ArrowDown':
-          setUserLocation(prev => ({ ...prev, y: Math.min(prev.y + step * zoomFactor, 600) }));
+          newY = Math.min(userLocationRef.current.y + step * zoomFactor, 600);
           break;
         case 'ArrowLeft':
-          setUserLocation(prev => ({ ...prev, x: Math.max(prev.x - step * zoomFactor, 0) }));
+          newX = Math.max(userLocationRef.current.x - step * zoomFactor, 0);
           break;
         case 'ArrowRight':
-          setUserLocation(prev => ({ ...prev, x: Math.min(prev.x + step * zoomFactor, 1200) }));
+          newX = Math.min(userLocationRef.current.x + step * zoomFactor, 1200);
           break;
         case '+':
         case '=':
           setZoom(z => Math.min(z + 0.1, 2));
-          break;
+          return;
         case '-':
           setZoom(z => Math.max(z - 0.1, 0.5));
-          break;
+          return;
+        default:
+          return;
+      }
+
+      setUserLocation({ x: newX, y: newY });
+
+      const targetDept = departmentsRef.current.find(dept => 
+        newX >= dept.x && 
+        newX <= dept.x + dept.width &&
+        newY >= dept.y && 
+        newY <= dept.y + dept.height
+      );
+      if (targetDept) {
+        setCurrentSection(targetDept.id);
       }
     };
-
     window.addEventListener('keydown', handleKeyPress);
     return () => window.removeEventListener('keydown', handleKeyPress);
-  }, [zoom]);
+  }, []);
 
   // Mouse event handlers
-  const handleMouseDown = (e: React.MouseEvent) => {
+  const handleMouseDown = useCallback((e: React.MouseEvent): void => {
     if (e.button === 0) {
       setIsDragging(true);
       setDragStart({ x: e.clientX, y: e.clientY });
     }
-  };
+  }, []);
 
-  const handleMouseMove = (e: React.MouseEvent) => {
+  const handleMouseMove = useCallback((e: React.MouseEvent): void => {
     if (isDragging && dragStart) {
       const dx = (e.clientX - dragStart.x) / zoom;
       const dy = (e.clientY - dragStart.y) / zoom;
@@ -213,25 +243,25 @@ const IndoorMap: React.FC = () => {
       
       setDragStart({ x: e.clientX, y: e.clientY });
     }
-  };
+  }, [isDragging, dragStart, zoom]);
 
-  const handleMouseUp = () => {
+  const handleMouseUp = useCallback((): void => {
     setIsDragging(false);
     setDragStart(null);
-  };
+  }, []);
 
-  const handleDoubleClick = (e: React.MouseEvent) => {
+  const handleDoubleClick = useCallback((e: React.MouseEvent): void => {
     const target = e.target as SVGElement;
     const rect = target.getBoundingClientRect();
     const x = (e.clientX - rect.left) / zoom;
     const y = (e.clientY - rect.top) / zoom;
     setUserLocation({ x, y });
-  };
+  }, [zoom]);
 
-  const handleDepartmentSelect = (department: Department) => {
+  const handleDepartmentSelect = useCallback((department: Department): void => {
     setSelectedDepartment(department);
     setCurrentSection(department.id);
-  };
+  }, []);
 
   return (
     <div className="p-4 max-w-6xl mx-auto">

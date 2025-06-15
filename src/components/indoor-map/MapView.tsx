@@ -1,22 +1,7 @@
 "use client";
 
-import React, { useRef, useEffect, useState } from 'react';
-import { Department, Location, NavigationPoint, ViewBox } from './types';
-
-interface MapViewProps {
-  departments: Department[];
-  navigationPoints: NavigationPoint[];
-  userLocation: Location;
-  viewBox: ViewBox;
-  zoom: number;
-  selectedDepartment: Department | null;
-  currentSection: string | null;
-  onDepartmentSelect: (department: Department) => void;
-  onMouseDown: (e: React.MouseEvent) => void;
-  onMouseMove: (e: React.MouseEvent) => void;
-  onMouseUp: () => void;
-  onDoubleClick: (e: React.MouseEvent) => void;
-}
+import React, { useRef, useEffect, useState, useCallback } from 'react';
+import { Department, Location, NavigationPoint, ViewBox, MapViewProps } from './types';
 
 const MapView: React.FC<MapViewProps> = ({
   departments,
@@ -34,11 +19,11 @@ const MapView: React.FC<MapViewProps> = ({
 }) => {
   const svgRef = useRef<SVGSVGElement>(null);
   const [currentPath, setCurrentPath] = useState<Location[]>([]);
-  const [currentPathIndex, setCurrentPathIndex] = useState(0);
-  const [isMoving, setIsMoving] = useState(false);
+  const [currentPathIndex, setCurrentPathIndex] = useState<number>(0);
+  const [isMoving, setIsMoving] = useState<boolean>(false);
 
   // Generate waypoints for smooth movement
-  const generateWaypoints = (from: Location, to: Location): Location[] => {
+  const generateWaypoints = useCallback((from: Location, to: Location): Location[] => {
     const waypoints: Location[] = [];
     const steps = 20;
     
@@ -51,7 +36,29 @@ const MapView: React.FC<MapViewProps> = ({
     }
     
     return waypoints;
-  };
+  }, []);
+
+  // Get center of a rectangle
+  const getRectCenter = useCallback((x: number, y: number, width: number, height: number): Location => ({
+    x: x + width / 2,
+    y: y + height / 2,
+  }), []);
+
+  // Get navigation icon path
+  const getNavigationIcon = useCallback((type: NavigationPoint['type']): string => {
+    switch (type) {
+      case 'entrance':
+        return 'M 0,0 L 10,0 L 10,10 L 0,10 Z M 2,2 L 8,2 L 8,8 L 2,8 Z';
+      case 'escalator':
+        return 'M 0,0 L 10,0 L 10,10 L 0,10 Z M 2,2 L 8,2 L 8,8 L 2,8 Z M 3,3 L 7,3 L 7,7 L 3,7 Z';
+      case 'restroom':
+        return 'M 0,0 L 10,0 L 10,10 L 0,10 Z M 2,2 L 8,2 L 8,8 L 2,8 Z M 3,3 L 7,3 L 7,7 L 3,7 Z';
+      case 'information':
+        return 'M 0,0 L 10,0 L 10,10 L 0,10 Z M 2,2 L 8,2 L 8,8 L 2,8 Z M 3,3 L 7,3 L 7,7 L 3,7 Z';
+      default:
+        return 'M 0,0 L 10,0 L 10,10 L 0,10 Z';
+    }
+  }, []);
 
   // Update path when selected department changes
   useEffect(() => {
@@ -67,7 +74,7 @@ const MapView: React.FC<MapViewProps> = ({
       setCurrentPathIndex(0);
       setIsMoving(true);
     }
-  }, [selectedDepartment]);
+  }, [selectedDepartment, userLocation, getRectCenter, generateWaypoints]);
 
   // Animate user movement along path
   useEffect(() => {
@@ -88,37 +95,12 @@ const MapView: React.FC<MapViewProps> = ({
   }, [isMoving, currentPath]);
 
   // Get current user position based on path animation
-  const getCurrentUserPosition = (): Location => {
+  const getCurrentUserPosition = useCallback((): Location => {
     if (currentPath.length === 0 || currentPathIndex >= currentPath.length) {
       return userLocation;
     }
     return currentPath[currentPathIndex];
-  };
-
-  const getNavigationIcon = (type: NavigationPoint['type']): string => {
-    switch (type) {
-      case 'entrance':
-        return 'M 0,0 L 10,0 L 10,10 L 0,10 Z M 2,2 L 8,2 L 8,8 L 2,8 Z';
-      case 'escalator':
-        return 'M 0,0 L 10,0 L 10,10 L 0,10 Z M 2,2 L 8,2 L 8,8 L 2,8 Z M 3,3 L 7,3 L 7,7 L 3,7 Z';
-      case 'restroom':
-        return 'M 0,0 L 10,0 L 10,10 L 0,10 Z M 2,2 L 8,2 L 8,8 L 2,8 Z M 3,3 L 7,3 L 7,7 L 3,7 Z';
-      case 'information':
-        return 'M 0,0 L 10,0 L 10,10 L 0,10 Z M 2,2 L 8,2 L 8,8 L 2,8 Z M 3,3 L 7,3 L 7,7 L 3,7 Z';
-      default:
-        return 'M 0,0 L 10,0 L 10,10 L 0,10 Z';
-    }
-  };
-
-  // Center of a rect
-  const getRectCenter = (x: number, y: number, width: number, height: number) => ({
-    x: x + width / 2,
-    y: y + height / 2,
-  });
-
-  // Navigation path: simple straight line for demo
-  const getNavPath = (from: {x: number, y: number}, to: {x: number, y: number}) =>
-    `M ${from.x},${from.y} L ${to.x},${to.y}`;
+  }, [currentPath, currentPathIndex, userLocation]);
 
   return (
     <div className="relative border rounded-lg bg-[#fafbfc] shadow-lg overflow-hidden">
@@ -139,7 +121,7 @@ const MapView: React.FC<MapViewProps> = ({
         </pattern>
         <rect width="100%" height="100%" fill="url(#grid) #fafbfc" />
 
-        {/* Departments as rects */}
+        {/* Departments */}
         {departments.map((dept) => {
           const isCurrentSection = currentSection === dept.id;
           const showAisles = selectedDepartment?.id === dept.id;
@@ -158,7 +140,6 @@ const MapView: React.FC<MapViewProps> = ({
                 style={{ filter: 'drop-shadow(0 4px 16px #3b82f622)' }}
                 className="hover:opacity-95 transition-opacity"
               />
-              {/* Department icon (if present) */}
               {dept.icon && (
                 <text
                   x={center.x}
@@ -171,7 +152,6 @@ const MapView: React.FC<MapViewProps> = ({
                   {dept.icon}
                 </text>
               )}
-              {/* Department name */}
               <text
                 x={center.x}
                 y={center.y - 2}
@@ -184,7 +164,6 @@ const MapView: React.FC<MapViewProps> = ({
               >
                 {dept.name}
               </text>
-              {/* Department category */}
               <text
                 x={center.x}
                 y={center.y + 28}
@@ -196,7 +175,6 @@ const MapView: React.FC<MapViewProps> = ({
               >
                 {dept.category}
               </text>
-              {/* Only show aisle rects/labels for selected department */}
               {showAisles && dept.aisles?.map((aisle) => {
                 const aisleCenter = getRectCenter(aisle.x, aisle.y, aisle.width, aisle.height);
                 return (
@@ -249,7 +227,7 @@ const MapView: React.FC<MapViewProps> = ({
           </g>
         ))}
 
-        {/* Path to selected department (blue) */}
+        {/* Path to selected department */}
         {selectedDepartment && currentPath.length > 0 && (
           <path
             d={`M ${currentPath.map(p => `${p.x},${p.y}`).join(' L ')}`}
